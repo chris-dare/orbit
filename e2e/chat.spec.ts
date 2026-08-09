@@ -51,6 +51,19 @@ test.beforeAll(async ({ request }, testInfo) => {
   ).toBe(200);
 });
 
+test.beforeEach(async ({ page }) => {
+  // Vercel injects its feedback widget into preview deployments. It is not
+  // part of the app, it is absent from production, and on Linux WebKit it
+  // throws on navigator.storage.persisted — which would fail every error
+  // assertion below for a reason that has nothing to do with this code.
+  // Stubbing it keeps those assertions strict about our own errors. It is
+  // served as empty rather than aborted, because a blocked request logs a
+  // console error of its own.
+  await page.route(/vercel\.live/, (route) =>
+    route.fulfill({ status: 200, contentType: "application/javascript", body: "" }),
+  );
+});
+
 test.describe("chat", () => {
   test("streams a reply and renders a code block", async ({ page }) => {
     const errors = watchForErrors(page);
