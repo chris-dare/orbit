@@ -123,6 +123,10 @@ export function Composer({
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
+            // A placeholder is not a label: it disappears on input and screen
+            // readers treat it as a hint. The name has to stay stable while the
+            // placeholder swaps to "Listening…".
+            aria-label="Message"
             placeholder={dictating ? "Listening…" : "Message"}
             className="w-full resize-none bg-transparent outline-none text-[16px] leading-6 px-2.5 pt-2.5 pb-1 max-h-40 placeholder:text-[var(--text-tertiary)]"
           />

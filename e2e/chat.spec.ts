@@ -14,9 +14,9 @@ function watchForErrors(page: Page) {
   return errors;
 }
 
-// Not getByRole("textbox") — the sidebar's search field also matches, and on
-// desktop the sidebar is open by default so it wins .first().
-const composerInput = (page: Page) => page.locator("textarea");
+// Named rather than page.locator("textarea"): the sidebar has a search field,
+// and editing a message opens a second textarea.
+const composerInput = (page: Page) => page.getByRole("textbox", { name: "Message" });
 
 // The same text can appear in the sidebar entry and the header title as well as
 // in the bubble, so assertions about message content scope to the transcript.
@@ -28,6 +28,28 @@ const send = async (page: Page, text: string) => {
   await composer.fill(text);
   await page.keyboard.press("Enter");
 };
+
+// Phrases from the mocked reply in src/app/page.tsx, used to wait on real
+// progress rather than on elapsed time.
+const REPLY_OPENING = "animation should explain a change";
+const REPLY_ENDING = "first-class state";
+const WIDEST_CODE_LINE = "Slight overshoot";
+
+const openSidebar = async (page: Page, isMobile: boolean) => {
+  if (isMobile) await page.getByRole("button", { name: /show sidebar/i }).click();
+};
+
+test.beforeAll(async ({ request }, testInfo) => {
+  // Without this a wall in front of the app (an auth redirect, a dead URL)
+  // surfaces as a dozen identical locator timeouts several minutes apart,
+  // instead of one line naming the cause.
+  const url = testInfo.project.use.baseURL!;
+  const res = await request.get(url, { maxRedirects: 0 });
+  expect(
+    res.status(),
+    `${url} did not serve the app directly (status ${res.status()}). If this is a redirect, the deployment is probably behind Vercel Deployment Protection.`,
+  ).toBe(200);
+});
 
 test.describe("chat", () => {
   test("streams a reply and renders a code block", async ({ page }) => {
@@ -41,41 +63,67 @@ test.describe("chat", () => {
     // evidence that any of it works.
     await expect(transcript(page).getByText("show me a code sample")).toBeVisible();
 
-    // Assistant replies land as a code block once the mocked turn completes.
+    await expect(transcript(page)).toContainText(REPLY_OPENING, { timeout: 30_000 });
     await expect(page.locator("pre").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: /copy code/i }).first()).toBeVisible();
 
     expect(errors).toEqual([]);
   });
 
-  test("does not overflow horizontally when a code block is present", async ({ page }) => {
+  test("does not overflow horizontally when a code block is present", async ({
+    page,
+    isMobile,
+  }) => {
     await page.goto("/");
     await send(page, "show me a code sample");
-    await expect(page.locator("pre").first()).toBeVisible({ timeout: 30_000 });
+
+    // The <pre> appears as soon as the opening fence streams in, while it is
+    // still empty, and measuring then would pass even with the overflow bug
+    // fully reintroduced. Waiting for the widest line to *start* arriving is
+    // not enough either — it is still half-written and therefore still narrow.
+    // The reply's closing words are the only signal that the block is final.
+    await expect(transcript(page)).toContainText(REPLY_ENDING, { timeout: 40_000 });
+    await expect(page.locator("pre").first()).toContainText(WIDEST_CODE_LINE);
 
     // A wide <pre> must scroll inside its own container rather than pushing
     // the page sideways — flex children default to min-width:auto, which
     // silently reintroduces this.
-    const overflows = await page.evaluate(
-      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    );
-    expect(overflows).toBe(false);
+    const measurements = await page.evaluate(() => {
+      const pre = document.querySelector("pre")!;
+      return {
+        pageOverflows:
+          document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        preScrolls: pre.scrollWidth > pre.clientWidth,
+      };
+    });
+
+    expect(measurements.pageOverflows).toBe(false);
+
+    // Only meaningful where the code is genuinely wider than the space for it.
+    // On a desktop viewport the widest line fits inside the bubble, so the
+    // block correctly does not scroll and asserting that it does is a
+    // coin-flip on the exact character width.
+    if (isMobile) expect(measurements.preScrolls).toBe(true);
   });
 
   test("stop halts a streaming reply", async ({ page }) => {
     await page.goto("/");
     await send(page, "tell me about spring animations");
 
-    const stop = page.getByRole("button", { name: /stop generating/i });
-    await expect(stop).toBeVisible();
-    await stop.click();
+    // Reasoning and the tool call run first. Stopping before any content
+    // streams would only prove a spinner can be cancelled.
+    await expect(transcript(page)).toContainText(REPLY_OPENING, { timeout: 30_000 });
 
-    // Once stopped, the composer offers to send again rather than to stop.
-    await expect(stop).toBeHidden();
+    await page.getByRole("button", { name: /stop generating/i }).click();
+    await expect(page.getByRole("button", { name: /stop generating/i })).toBeHidden();
 
-    const settled = await page.locator("body").innerText();
-    await page.waitForTimeout(2500);
-    expect(await page.locator("body").innerText()).toBe(settled);
+    // The reply was cut off partway, so the text it would have ended with
+    // must never arrive.
+    const settled = await transcript(page).innerText();
+    await expect
+      .poll(async () => transcript(page).innerText(), { timeout: 5_000, intervals: [1_000] })
+      .toBe(settled);
+    expect(settled).not.toContain(REPLY_ENDING);
   });
 });
 
@@ -103,8 +151,12 @@ test.describe("voice", () => {
     await page.goto("/");
 
     await page.getByRole("button", { name: /^dictate$/i }).click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    // Assert the dialog is absent only after dictation has visibly done
+    // something. Checking first would pass before voice mode could have
+    // opened, which is the failure it is meant to catch.
     await expect(composerInput(page)).not.toBeEmpty({ timeout: 15_000 });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 });
 
@@ -113,13 +165,25 @@ test.describe("conversations", () => {
     const errors = watchForErrors(page);
     await page.goto("/");
 
-    if (isMobile) await page.getByRole("button", { name: /show sidebar/i }).click();
+    // Fixture content from src/lib/mock.ts. Asserting on the message body
+    // rather than the sidebar label matters: the label is what was clicked,
+    // so it stays on screen whether or not the thread actually changed.
+    const kyoto = "Packing for Kyoto in November";
+    const swift = "Why does Swift force me to unwrap optionals?";
 
-    const items = page.locator("aside nav button").filter({ hasNotText: /^$/ });
-    const first = items.nth(0);
-    const firstTitle = (await first.innerText()).split("\n")[0];
-    await first.click();
-    await expect(page.getByText(firstTitle, { exact: false }).first()).toBeVisible();
+    await openSidebar(page, isMobile);
+    await page.getByRole("button", { name: /Trip to Kyoto/ }).click();
+    await expect(transcript(page)).toContainText(kyoto);
+
+    await openSidebar(page, isMobile);
+    await page.getByRole("button", { name: /Explaining Swift optionals/ }).click();
+    await expect(transcript(page)).toContainText(swift);
+    await expect(transcript(page)).not.toContainText(kyoto);
+
+    // Going back must restore the thread, not a blank one.
+    await openSidebar(page, isMobile);
+    await page.getByRole("button", { name: /Trip to Kyoto/ }).click();
+    await expect(transcript(page)).toContainText(kyoto);
 
     expect(errors).toEqual([]);
   });
