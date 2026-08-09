@@ -357,6 +357,9 @@ export function MessageList({
     <div className="relative flex-1 min-h-0">
       <div
         ref={scrollRef}
+        role="log"
+        aria-label="Conversation"
+        aria-live="polite"
         onScroll={onScroll}
         onWheel={(e) => {
           if (e.deltaY < 0) unpin();

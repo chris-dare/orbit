@@ -8,6 +8,7 @@ import { Composer } from "@/components/Composer";
 import { VoiceOverlay } from "@/components/VoiceOverlay";
 import { Attachment, Conversation, Message, ToolCall } from "@/lib/types";
 import { conversations as seedConversations } from "@/lib/mock";
+import { useClientValue, useMediaQuery } from "@/lib/client-only";
 
 const NEW_CHAT_ID = "new";
 
@@ -53,7 +54,12 @@ const TOOL_CALL: Omit<ToolCall, "status"> = {
 };
 
 export default function Home() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // The sidebar follows the viewport until the user says otherwise, after
+  // which their choice sticks.
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const [sidebarPreference, setSidebarPreference] = useState<boolean | null>(null);
+  const sidebarOpen = sidebarPreference ?? isDesktop;
+  const setSidebarOpen = setSidebarPreference;
   const [conversations, setConversations] = useState<Conversation[]>(seedConversations);
   const [threads, setThreads] = useState<Record<string, Message[]>>(() =>
     Object.fromEntries(seedConversations.map((c) => [c.id, c.messages]))
@@ -62,7 +68,13 @@ export default function Home() {
   const activeIdRef = useRef(activeId);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [greeting, setGreeting] = useState("");
+  // Depends on the viewer's local clock, so it can only be resolved in the
+  // browser; the server renders nothing rather than a mismatched greeting.
+  const greeting = useClientValue(() => {
+    const hour = new Date().getHours();
+    const period = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+    return `Good ${period}, Chris`;
+  }, "");
   const [model, setModel] = useState("pro");
   const genRef = useRef<{
     timeouts: ReturnType<typeof setTimeout>[];
@@ -88,13 +100,6 @@ export default function Home() {
     activeIdRef.current = activeId;
   }, [activeId]);
 
-  useEffect(() => {
-    setSidebarOpen(window.matchMedia("(min-width: 768px)").matches);
-    const hour = new Date().getHours();
-    const period = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
-    setGreeting(`Good ${period}, Chris`);
-  }, []);
-
   const clearGeneration = () => {
     genRef.current.timeouts.forEach(clearTimeout);
     genRef.current.timeouts = [];
@@ -104,7 +109,7 @@ export default function Home() {
   useEffect(() => clearGeneration, []);
 
   const closeSidebarOnMobile = () => {
-    if (!window.matchMedia("(min-width: 768px)").matches) setSidebarOpen(false);
+    if (!isDesktop) setSidebarOpen(false);
   };
 
   /** Settles whatever is mid-flight so a thread is never left mid-stream. */
@@ -336,7 +341,7 @@ export default function Home() {
     <div className="flex h-dvh w-full">
       <Sidebar
         open={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
         onNewChat={handleNewChat}
         onSelect={handleSelectConversation}
         onDelete={handleDeleteConversation}
@@ -345,10 +350,10 @@ export default function Home() {
         activeId={activeId}
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <main className="flex-1 flex flex-col min-w-0">
         <TopBar
           sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           title={conversations.find((c) => c.id === activeId)?.title ?? "New conversation"}
         />
 
@@ -386,7 +391,7 @@ export default function Home() {
             />
           </>
         )}
-      </div>
+      </main>
 
       {voiceOpen && <VoiceOverlay onClose={() => setVoiceOpen(false)} />}
     </div>
