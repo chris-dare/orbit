@@ -13,11 +13,14 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 20_000 },
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // One retry distinguishes a genuine failure from an infrastructure blip
+  // without turning a timing-dependent assertion into a reliable pass.
+  retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
   use: {
     baseURL,
-    trace: "on-first-retry",
+    // Not "on-first-retry" — that leaves the first failure with no trace at all.
+    trace: "retain-on-failure",
     video: "retain-on-failure",
   },
   projects: [

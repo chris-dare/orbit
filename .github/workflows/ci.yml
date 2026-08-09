@@ -4,21 +4,21 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Vercel's Git integration builds every PR and reports the result here. The
-  # e2e job hangs off that event so it tests the real preview deployment
-  # rather than a second, CI-local build of the same commit.
-  deployment_status:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Superseded pushes to a PR are worth cancelling. A push to main is not:
+  # Vercel is already deploying that commit to production, so its checks need
+  # to finish even if another merge lands behind it.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
-    # deployment_status fires this workflow too; the static checks belong to
-    # the push/PR events only.
-    if: github.event_name != 'deployment_status'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
 
@@ -40,37 +40,3 @@ jobs:
 
       - name: Unit tests
         run: npm test
-
-  e2e:
-    # Only preview deployments, and only once they are actually live.
-    if: >
-      github.event_name == 'deployment_status' &&
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment_status.environment != 'Production'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.deployment.sha }}
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-
-      - run: npm ci
-
-      - name: Install browsers
-        run: npx playwright install --with-deps chromium webkit
-
-      - name: End-to-end tests
-        run: npm run test:e2e
-        env:
-          BASE_URL: ${{ github.event.deployment_status.target_url }}
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
