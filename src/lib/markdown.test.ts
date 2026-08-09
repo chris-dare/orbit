@@ -32,4 +32,26 @@ describe("balanceFences", () => {
   it("handles the moment the opening fence arrives alone", () => {
     expect(balanceFences("```")).toBe("```\n```");
   });
+
+  it("counts a fence indented inside a list item", () => {
+    // Up to three spaces of indent still opens a block, so a code sample
+    // nested under a bullet must be closed like any other.
+    expect(balanceFences("- Example:\n  ```ts\n  const a = 1;")).toBe(
+      "- Example:\n  ```ts\n  const a = 1;\n```",
+    );
+  });
+
+  it("closes a long fence with a run of matching length", () => {
+    // A four-backtick block exists precisely so it can contain three-backtick
+    // ones; closing it with three would not close it.
+    expect(balanceFences("````md\n```ts\na\n```")).toBe("````md\n```ts\na\n```\n````");
+  });
+
+  it("treats a longer run as closing a shorter one", () => {
+    expect(balanceFences("```ts\na\n````")).toBe("```ts\na\n````");
+  });
+
+  it("does not treat a fence carrying an info string as a closer", () => {
+    expect(balanceFences("```ts\na\n```js")).toBe("```ts\na\n```js\n```");
+  });
 });

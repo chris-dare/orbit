@@ -10,6 +10,8 @@ export default defineConfig({
     // Unit tests only. Browser-level behaviour lives in e2e/ and runs against a
     // real deployment, so nothing here needs a DOM.
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // .tsx included so a component test is never silently skipped. Adding one
+    // means switching to environment: "jsdom" and a setup file.
+    include: ["src/**/*.test.{ts,tsx}"],
   },
 });
