@@ -16,6 +16,7 @@ const GROUP_ORDER: DateGroup[] = ["Today", "Yesterday", "Previous 7 Days"];
 
 export function Sidebar({
   open,
+  inert,
   onToggle,
   onNewChat,
   onSelect,
@@ -24,7 +25,11 @@ export function Sidebar({
   conversations,
   activeId,
 }: {
-  open: boolean;
+  /** `null` leaves the drawer to CSS: shut on mobile, open from `md:` up. That
+   *  is the state the server can render correctly, so nothing animates into
+   *  place on hydration. A boolean is an explicit user choice. */
+  open: boolean | null;
+  inert: boolean;
   onToggle: () => void;
   onNewChat: () => void;
   onSelect: (id: string) => void;
@@ -59,7 +64,7 @@ export function Sidebar({
 
   return (
     <>
-      {open && (
+      {open === true && (
         <button
           aria-label="Close sidebar"
           onClick={onToggle}
@@ -68,8 +73,15 @@ export function Sidebar({
       )}
 
       <aside
+        // Hidden purely visually, so without this every control inside stays
+        // focusable and in the accessibility tree while the drawer is shut.
+        inert={inert}
         className={`fixed inset-y-0 left-0 z-40 w-[84vw] max-w-[300px] transition-transform duration-300 [transition-timing-function:var(--ease-spring)] md:static md:z-auto md:max-w-none md:shrink-0 md:overflow-hidden md:transition-[width] ${
-          open ? "translate-x-0 md:w-[272px]" : "-translate-x-full md:w-0"
+          open === null
+            ? "-translate-x-full md:translate-x-0 md:w-[272px]"
+            : open
+              ? "translate-x-0 md:w-[272px]"
+              : "-translate-x-full md:w-0"
         }`}
       >
         <div className="w-[84vw] max-w-[300px] md:w-[272px] h-full flex flex-col bg-[var(--surface-translucent)] backdrop-blur-xl backdrop-saturate-[1.8] border-r border-[var(--border)]">

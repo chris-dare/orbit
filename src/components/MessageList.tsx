@@ -359,7 +359,15 @@ export function MessageList({
         ref={scrollRef}
         role="log"
         aria-label="Conversation"
-        aria-live="polite"
+        // role="log" already implies aria-live="polite"; stating it again adds
+        // nothing. aria-busy is what matters: a reply arrives one word at a
+        // time, and without this every tick queues its own announcement, so the
+        // reply gets read back incrementally instead of once when it settles.
+        aria-busy={isGenerating}
+        // Makes the transcript reachable by keyboard, which it has to be to
+        // scroll — and without which the ArrowUp/PageUp handler below can
+        // never fire.
+        tabIndex={0}
         onScroll={onScroll}
         onWheel={(e) => {
           if (e.deltaY < 0) unpin();

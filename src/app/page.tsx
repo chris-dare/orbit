@@ -54,12 +54,20 @@ const TOOL_CALL: Omit<ToolCall, "status"> = {
 };
 
 export default function Home() {
-  // The sidebar follows the viewport until the user says otherwise, after
-  // which their choice sticks.
+  // The sidebar follows the viewport until the user says otherwise. A choice
+  // only holds at the width it was made at, so crossing the breakpoint falls
+  // back to the viewport default — otherwise closing the drawer once on a
+  // phone would pin it shut for the rest of the session, including on desktop.
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const [sidebarPreference, setSidebarPreference] = useState<boolean | null>(null);
-  const sidebarOpen = sidebarPreference ?? isDesktop;
-  const setSidebarOpen = setSidebarPreference;
+  const [sidebarPref, setSidebarPref] = useState<{ open: boolean; atDesktop: boolean } | null>(
+    null
+  );
+  // null means "no choice applies here" — the sidebar is left to CSS, so the
+  // server can emit correct markup and desktop doesn't paint it collapsed and
+  // then slide it open on hydration.
+  const sidebarChoice = sidebarPref && sidebarPref.atDesktop === isDesktop ? sidebarPref.open : null;
+  const sidebarOpen = sidebarChoice ?? isDesktop;
+  const setSidebarOpen = (open: boolean) => setSidebarPref({ open, atDesktop: isDesktop });
   const [conversations, setConversations] = useState<Conversation[]>(seedConversations);
   const [threads, setThreads] = useState<Record<string, Message[]>>(() =>
     Object.fromEntries(seedConversations.map((c) => [c.id, c.messages]))
@@ -340,7 +348,8 @@ export default function Home() {
   return (
     <div className="flex h-dvh w-full">
       <Sidebar
-        open={sidebarOpen}
+        open={sidebarChoice}
+        inert={!sidebarOpen}
         onToggle={() => setSidebarOpen(!sidebarOpen)}
         onNewChat={handleNewChat}
         onSelect={handleSelectConversation}
@@ -352,7 +361,7 @@ export default function Home() {
 
       <main className="flex-1 flex flex-col min-w-0">
         <TopBar
-          sidebarOpen={sidebarOpen}
+          sidebarOpen={sidebarChoice}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           title={conversations.find((c) => c.id === activeId)?.title ?? "New conversation"}
         />
