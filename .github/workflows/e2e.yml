@@ -1,0 +1,61 @@
+name: E2E
+
+# Vercel's Git integration publishes a preview per pull request and reports it
+# here. Testing that deployment means testing the artifact that would actually
+# ship, rather than a second CI-local build of the same commit.
+#
+# This lives in its own file on purpose. Sharing a workflow with the static
+# checks makes both events emit check runs under both job names, and the
+# skipped one lands last and overwrites the real result.
+on:
+  deployment_status
+
+permissions:
+  contents: read
+
+concurrency:
+  # Vercel sets the deployment ref to a commit SHA, so `github.ref` is empty on
+  # this event and grouping by it would collapse every run in the repository
+  # into one group, cancelling unrelated PRs.
+  group: e2e-${{ github.event.deployment.sha }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    # Only preview deployments, and only once they are actually live.
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment != 'Production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # `github.ref` is empty on this event; the deployment carries the sha.
+          ref: ${{ github.event.deployment.sha }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+        env:
+          # `environment_url` is the deployed site. `target_url` currently holds
+          # the same value but is documented as the log location.
+          BASE_URL: ${{ github.event.deployment_status.environment_url }}
+
+      - uses: actions/upload-artifact@v4
+        # Not `!cancelled()`: a cancelled run is the case most in need of a
+        # report, and it would upload nothing.
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
